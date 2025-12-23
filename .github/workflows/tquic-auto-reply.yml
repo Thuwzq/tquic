@@ -97,7 +97,7 @@ jobs:
             headers = {
                 "Authorization": f"Bearer {os.getenv('GITHUB_TOKEN')}",
                 "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": 2022-11-28
+                "X-GitHub-Api-Version": "2022-11-28"
             }
             # GitHub Discussions API uses discussion_number
             api_url = f"https://api.github.com/repos/{os.getenv('REPO_OWNER')}/{os.getenv('REPO_NAME')}/discussions/{os.getenv('DISCUSSION_NUMBER')}/comments"
