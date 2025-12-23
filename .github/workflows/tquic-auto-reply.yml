@@ -62,6 +62,7 @@ jobs:
               reply_content = response.choices[0].message.content.strip()
           except Exception as e:
               reply_content = f"Sorry, auto reply failed, please wait for replay from other people."
+          print(reply_content)
 
           # 4. Use GitHub API to reply
           headers = {
