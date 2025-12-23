@@ -26,7 +26,7 @@ jobs:
           # Github token, auto fetch
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Disscussion message
-          DISCUSSION_ID: ${{ github.event.discussion.id }}
+          DISCUSSION_NUMBER: ${{ github.event.discussion.number }}
           DISCUSSION_TITLE: ${{ github.event.discussion.title }}
           DISCUSSION_BODY: ${{ github.event.discussion.body }}
           REPO_OWNER: ${{ github.event.repository.owner.login }}
@@ -37,7 +37,7 @@ jobs:
             from openai import OpenAI
             import requests
 
-            print("debug info: disscussion_title:{os.getenv('DISCUSSION_TITLE')}, disscussion_body:{os.getenv('DISCUSSION_BODY')}, repo_owner:{os.getenv('REPO_OWNER')}, repo_name:{os.getenv('REPO_NAME')}, discussion_id:{os.getenv('DISCUSSION_ID')}")
+            print(f"debug info: disscussion_title:{os.getenv('DISCUSSION_TITLE')}, disscussion_body:{os.getenv('DISCUSSION_BODY')}, repo_owner:{os.getenv('REPO_OWNER')}, repo_name:{os.getenv('REPO_NAME')}, discussion_number:{os.getenv('DISCUSSION_NUMBER')}")
 
             # 1. Init GitHub Model client
             github_token = os.getenv("GITHUB_TOKEN")
@@ -80,7 +80,7 @@ jobs:
 
                 response_data = response.json()
                 reply_content = response_data["choices"][0]["message"]["content"].strip()
-                print(reply_content)
+                print("success get reply from ai: " + reply_content)
 
 
             except requests.exceptions.Timeout:
@@ -99,7 +99,8 @@ jobs:
                 "Authorization": f"token {os.getenv('GITHUB_TOKEN')}",
                 "Accept": "application/vnd.github.v3+json"
             }
-            api_url = f"https://api.github.com/repos/{os.getenv('REPO_OWNER')}/{os.getenv('REPO_NAME')}/discussions/{os.getenv('DISCUSSION_ID')}/comments"
+            # GitHub Discussions API uses discussion_number
+            api_url = f"https://api.github.com/repos/{os.getenv('REPO_OWNER')}/{os.getenv('REPO_NAME')}/discussions/{os.getenv('DISCUSSION_NUMBER')}/comments"
             payload = {"body": reply_content}
 
             # Send POST request
