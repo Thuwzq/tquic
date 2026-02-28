@@ -1057,6 +1057,7 @@ pub enum Shutdown {
 }
 
 /// Important events about path
+#[derive(Clone, Copy, Debug)]
 pub enum PathEvent {
     /// The path has been validated.
     Validated(usize),
@@ -1274,3 +1275,4 @@ pub mod timer_queue;
 mod token;
 mod trans_param;
 mod window;
+pub mod videogop;

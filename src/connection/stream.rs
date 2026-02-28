@@ -188,6 +188,16 @@ impl StreamMap {
         }
     }
 
+    /// Returns the connection's send-side flow control limit.
+    pub fn conn_max_tx_data(&self) -> u64 {
+        self.send_capacity.max_data
+    }
+
+    /// Returns the total amount of data sent on the entire connection.
+    pub fn conn_tx_data(&self) -> u64 {
+        self.send_capacity.tx_data
+    }
+
     /// Set trace id.
     pub fn set_trace_id(&mut self, trace_id: &str) {
         self.trace_id = trace_id.to_string();
@@ -1945,6 +1955,11 @@ impl Stream {
     pub fn mark_closed(&mut self) {
         self.flags.insert(Closed);
     }
+
+    /// Get mutable reference to the context
+    pub fn get_context(&mut self) -> Option<&mut (dyn Any + Send + Sync)> {
+        self.context.as_mut().map(|boxed| &mut **boxed)
+    }
 }
 
 /// Return true if the stream was created locally.
@@ -2014,6 +2029,9 @@ pub struct RecvBuf {
     /// The largest data offset that has been received on this stream.
     recv_off: u64,
 
+    /// The largest data offset that was continous received.
+    contig_recv_off: u64,
+
     /// The final stream offset received from the peer, if any.
     fin_off: Option<u64>,
 
@@ -2028,6 +2046,15 @@ pub struct RecvBuf {
 
     /// Unique trace id for debug logging.
     trace_id: String,
+
+    /// Recv buffer create time.
+    create_time: Option<Instant>,
+
+    /// Continous bytes need to be attention
+    flag_byte: u64, 
+
+    /// If flag bytes has been received
+    flag_byte_received: bool,
 }
 
 impl RecvBuf {
@@ -2035,6 +2062,9 @@ impl RecvBuf {
     fn new(max_data: u64, max_window: u64) -> RecvBuf {
         RecvBuf {
             flow_control: flowcontrol::FlowControl::new(max_data, max_window),
+            create_time: Some(Instant::now()),
+            flag_byte: 408687,
+            flag_byte_received: false,
             ..RecvBuf::default()
         }
     }
@@ -2158,6 +2188,7 @@ impl RecvBuf {
             }
         }
 
+        self.update_contig_recv_off();
         Ok(())
     }
 
@@ -2354,6 +2385,38 @@ impl RecvBuf {
     /// Actually, this is same as `is_fin()`.
     fn is_complete(&self) -> bool {
         self.fin_off == Some(self.read_off)
+    }
+
+    /// Get the continuous receive offset.
+    pub fn contig_recv_off(&self) -> u64 {
+        self.contig_recv_off
+    }
+
+    /// Update the continuous receive offset.
+    fn update_contig_recv_off(&mut self) {
+        let mut current_off = self.read_off;
+        
+        for (_, buf) in &self.data {
+            if buf.off() == current_off {
+                current_off = buf.max_off();
+            } else if buf.off() > current_off {
+                break;
+            }
+        }
+
+        if current_off > self.flag_byte && !self.flag_byte_received {
+            let now = Instant::now();
+            match self.create_time {
+                Some(t) => {
+                    let elapsed = now.duration_since(t).as_millis();
+                    self.flag_byte_received = true;  
+                    error!("receive first frame over, elapsed time in ms: {}", elapsed);
+                },
+                None => {}
+            }
+        }
+
+        self.contig_recv_off = current_off;
     }
 }
 
@@ -2868,6 +2931,11 @@ impl SendBuf {
         } else {
             self.unsent_off
         }
+    }
+
+    /// Get the lowest offset of data without retransmission
+    pub fn send_off_without_retrans(&self) -> u64 {
+        self.unsent_off
     }
 
     /// Get the maximum offset of data that peer allows to send.

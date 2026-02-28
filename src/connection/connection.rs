@@ -2539,6 +2539,7 @@ impl Connection {
             || self.is_closing()
             || out.len() <= frame::MAX_STREAM_OVERHEAD
             || !self.paths.get(path_id)?.active()
+            || !self.paths.path_allow_stream_frames(path_id)
         {
             return Ok(());
         }

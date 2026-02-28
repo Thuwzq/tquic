@@ -20,6 +20,9 @@ use std::time::Instant;
 use self::scheduler_minrtt::*;
 use self::scheduler_redundant::*;
 use self::scheduler_rr::*;
+use self::scheduler_emvod::*;
+use self::scheduler_ecf::*;
+use self::scheduler_blest::*;
 use crate::connection::path::PathMap;
 use crate::connection::space::PacketNumSpaceMap;
 use crate::connection::space::SentPacket;
@@ -83,6 +86,13 @@ pub enum MultipathAlgorithm {
     /// distribution across all path is equal. It is only used for testing
     /// purposes.
     RoundRobin,
+
+    /// MpVOD scheduler is designed for video streaming.
+    /// The goal of MpVOD scheduler is minimize the first frame delay and cost of backup path. (Experimental)
+    EMVOD,
+
+    Blest,
+    Ecf,
 }
 
 impl FromStr for MultipathAlgorithm {
@@ -95,6 +105,12 @@ impl FromStr for MultipathAlgorithm {
             Ok(MultipathAlgorithm::Redundant)
         } else if algor.eq_ignore_ascii_case("roundrobin") {
             Ok(MultipathAlgorithm::RoundRobin)
+        } else if algor.eq_ignore_ascii_case("ecf") {
+            Ok(MultipathAlgorithm::Ecf)
+        } else if algor.eq_ignore_ascii_case("blest") {
+            Ok(MultipathAlgorithm::Blest)
+        } else if algor.eq_ignore_ascii_case("emvod") {
+            Ok(MultipathAlgorithm::EMVOD)
         } else {
             Err(Error::InvalidConfig("unknown".into()))
         }
@@ -107,6 +123,9 @@ pub(crate) fn build_multipath_scheduler(conf: &MultipathConfig) -> Box<dyn Multi
         MultipathAlgorithm::MinRtt => Box::new(MinRttScheduler::new(conf)),
         MultipathAlgorithm::Redundant => Box::new(RedundantScheduler::new(conf)),
         MultipathAlgorithm::RoundRobin => Box::new(RoundRobinScheduler::new(conf)),
+        MultipathAlgorithm::EMVOD => Box::new(EMVODScheduler::new(conf)),
+        MultipathAlgorithm::Blest => Box::new(BlestScheduler::new(conf)),
+        MultipathAlgorithm::Ecf => Box::new(EcfScheduler::new(conf)),
     }
 }
 
@@ -115,6 +134,9 @@ pub(crate) fn buffer_required(algor: MultipathAlgorithm) -> bool {
         MultipathAlgorithm::MinRtt => false,
         MultipathAlgorithm::Redundant => true,
         MultipathAlgorithm::RoundRobin => false,
+        MultipathAlgorithm::EMVOD => true,
+        MultipathAlgorithm::Blest => false,
+        MultipathAlgorithm::Ecf => false,
     }
 }
 
@@ -196,6 +218,14 @@ pub(crate) mod tests {
             ("Roundrobin", Ok(MultipathAlgorithm::RoundRobin)),
             ("RoundRobin", Ok(MultipathAlgorithm::RoundRobin)),
             ("ROUNDROBIN", Ok(MultipathAlgorithm::RoundRobin)),
+            ("emvod", Ok(MultipathAlgorithm::EMVOD)),
+            ("EMVOD", Ok(MultipathAlgorithm::EMVOD)),
+            ("ECF", Ok(MultipathAlgorithm::Ecf)),
+            ("ecf", Ok(MultipathAlgorithm::Ecf)),
+            ("Ecf", Ok(MultipathAlgorithm::Ecf)),
+            ("BLEST", Ok(MultipathAlgorithm::Blest)),
+            ("blest", Ok(MultipathAlgorithm::Blest)),
+            ("Blest", Ok(MultipathAlgorithm::Blest)),
             ("redun", Err(Error::InvalidConfig("unknown".into()))),
         ];
 
@@ -208,3 +238,6 @@ pub(crate) mod tests {
 mod scheduler_minrtt;
 mod scheduler_redundant;
 mod scheduler_rr;
+mod scheduler_emvod;
+mod scheduler_blest; 
+mod scheduler_ecf;

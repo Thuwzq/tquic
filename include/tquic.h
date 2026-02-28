@@ -110,6 +110,11 @@ typedef enum quic_multipath_algorithm {
    * purposes.
    */
   QUIC_MULTIPATH_ALGORITHM_ROUND_ROBIN,
+  /**
+   * EMVOD scheduler is designed for video streaming.
+   * The goal of EMVOD scheduler is minimize the first frame delay and cost of backup path. (Experimental)
+   */
+  QUIC_MULTIPATH_ALGORITHM_EMVOD,
 } quic_multipath_algorithm;
 
 /**

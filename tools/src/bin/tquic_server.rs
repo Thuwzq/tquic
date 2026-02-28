@@ -46,6 +46,7 @@ use tquic::MultipathAlgorithm;
 use tquic::PacketInfo;
 use tquic::TlsConfig;
 use tquic::TransportHandler;
+use tquic::videogop::VideoGopCollection;
 use tquic_tools::ApplicationProto;
 use tquic_tools::CertCompressionAlgorithmArg;
 use tquic_tools::QuicSocket;
@@ -835,6 +836,25 @@ impl ConnectionHandler {
                             headers.len(),
                             body.len()
                         );
+
+                        let gop_file_path = headers
+                                        .iter()
+                                        .find(|header| header.name() == b":path")
+                                        .map(|header| {
+                                            std::str::from_utf8(header.value())
+                                                .unwrap()
+                                                .replace(".flv", ".txt")
+                                                .trim_start_matches('/')
+                                                .to_string()
+                                        })
+                                        .expect("No :path header found");
+
+
+                        
+                        let mut sctx = VideoGopCollection::from_file(&gop_file_path).unwrap();
+                        let now = Instant::now();
+                        sctx.set_request_timestamp(now);
+                        conn.stream_set_context(stream_id, sctx).unwrap();
 
                         if let Err(e) = self.process_h3_request(&headers, conn, stream_id, &body) {
                             error!("{:?}", e);

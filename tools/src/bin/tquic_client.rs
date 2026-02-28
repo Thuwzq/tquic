@@ -14,7 +14,7 @@
 
 use std::cell::RefCell;
 use std::cell::RefMut;
-use std::cmp::max;
+use std::cmp;
 use std::fs::create_dir_all;
 use std::fs::File;
 use std::io::BufWriter;
@@ -32,6 +32,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Instant;
+use std::time::Duration;
 
 use bytes::Bytes;
 use clap::error::ErrorKind;
@@ -286,6 +287,15 @@ pub struct ClientOpt {
     )]
     pub cid_len: usize,
 
+    /// Request will not be sent until the request_idle_time out
+    #[clap(
+        long,
+        default_value = "0",
+        value_name = "TIME",
+        help_heading = "Protocol"
+    )]
+    pub request_idle_time: u64,
+
     /// Print response header and body to stdout.
     #[clap(short, long, help_heading = "Output")]
     pub print_res: bool,
@@ -461,6 +471,12 @@ impl Client {
             context.conn_stats.sent_bytes,
             context.conn_stats.lost_bytes
         );
+        if !context.local_addr_recv_bytes.is_empty() {
+            println!("recv bytes by local address:");
+            for (local_addr, bytes) in &context.local_addr_recv_bytes {
+                println!("\t{}: {} bytes", local_addr, bytes);
+            }
+        }
         println!();
     }
 }
@@ -480,6 +496,7 @@ struct ClientContext {
     conn_finish_failed: u64,
     end_time: Option<Instant>,
     conn_stats: ConnectionStats,
+    local_addr_recv_bytes: FxHashMap<SocketAddr, u64>,
 }
 
 fn update_conn_stats(total: &mut ConnectionStats, one: &ConnectionStats) {
@@ -646,7 +663,15 @@ impl Worker {
                 break;
             }
 
-            self.poll.poll(&mut events, self.endpoint.timeout())?;
+            
+            let mut client_timeout = self.endpoint.timeout();
+            if self.option.request_idle_time != 0 && !self.worker_ctx.borrow().has_sent_request {
+                let min_start_time = self.senders.borrow_mut().values().map(|sender| sender.start_time).min().unwrap_or(Instant::now());
+                client_timeout = cmp::min(client_timeout, Some(Duration::from_millis(self.option.request_idle_time) - min_start_time.elapsed()));
+            }
+
+            // self.poll.poll(&mut events, self.endpoint.timeout())?;
+            self.poll.poll(&mut events, client_timeout)?;
 
             // Process IO events
             for event in events.iter() {
@@ -786,7 +811,10 @@ impl Worker {
                     return Err(format!("socket recv error: {:?}", e).into());
                 }
             };
-            debug!("socket recv {} bytes from {:?}", len, remote);
+            debug!("socket {:?} recv {} bytes from {:?}", local, len, remote);
+
+            let mut worker_ctx = self.worker_ctx.borrow_mut();
+            *worker_ctx.local_addr_recv_bytes.entry(local).or_insert(0) += len as u64;
 
             let pkt_buf = &mut self.recv_buf[..len];
             let pkt_info = PacketInfo {
@@ -829,6 +857,10 @@ impl Worker {
             client_ctx.end_time = self.end_time;
         }
         update_conn_stats(&mut client_ctx.conn_stats, &worker_ctx.conn_stats);
+
+        for (local_addr, bytes) in &worker_ctx.local_addr_recv_bytes {
+            *client_ctx.local_addr_recv_bytes.entry(*local_addr).or_insert(0) += bytes;
+        }
     }
 }
 
@@ -849,6 +881,8 @@ struct WorkerContext {
     concurrent_conns: u32,
     conn_stats: ConnectionStats,
     connected: bool,
+    has_sent_request: bool,
+    local_addr_recv_bytes: FxHashMap<SocketAddr, u64>,
 }
 
 impl WorkerContext {
@@ -866,6 +900,7 @@ impl WorkerContext {
             }
         }
 
+        worker_ctx.has_sent_request = false;
         worker_ctx
     }
 }
@@ -987,6 +1022,12 @@ struct RequestSender {
 
     /// H3 connection, used in h3 mode.
     h3_conn: Option<Http3Connection>,
+
+    /// Request sender start time
+    start_time: Instant,
+
+    /// Request sender can only sent request after idle time passed, unit ms.
+    idle_time: u64,
 }
 
 impl RequestSender {
@@ -1008,6 +1049,8 @@ impl RequestSender {
             app_proto: ApplicationProto::from_slice(conn.application_proto()),
             next_stream_id: 0,
             h3_conn: None,
+            start_time: Instant::now(),
+            idle_time: option.request_idle_time,
         };
 
         if sender.app_proto == ApplicationProto::H3 {
@@ -1030,10 +1073,17 @@ impl RequestSender {
             self.option.max_requests_per_conn
         );
 
+        // Check if the request sender is idle.
+        if self.start_time.elapsed() < Duration::from_millis(self.idle_time){
+            debug!("{} request sender is not idle, request sender start time: {:?}, now: {:?}", conn.trace_id(), self.start_time, Instant::now());
+            return;
+        }
+
         while self.concurrent_requests < self.option.max_concurrent_requests
             && (self.option.max_requests_per_conn == 0
                 || self.request_sent < self.option.max_requests_per_conn)
         {
+            self.worker_ctx.borrow_mut().has_sent_request = true;
             if let Err(e) = self.send_request(conn) {
                 error!("{} send request error {}", conn.trace_id(), e);
                 break;

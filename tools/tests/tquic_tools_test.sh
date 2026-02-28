@@ -287,6 +287,9 @@ for TEST_CASE in ${TEST_CASES//,/ }; do
         multipath_roundrobin)
             test_multipath "$TEST_DIR/roundrobin" roundrobin
             ;;
+        multipath_roundrobin)
+            test_multipath "$TEST_DIR/emvod" emvod
+            ;;
         range_request)
             test_range_request "$TEST_DIR/range"
             ;;

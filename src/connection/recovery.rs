@@ -121,6 +121,9 @@ pub struct Recovery {
 
     /// Trace id.
     trace_id: String,
+
+    /// Queue to store loss event timestamps for tracking loss patterns
+    pub loss_timestamps: VecDeque<(Instant, u64)>,
 }
 
 impl Recovery {
@@ -146,6 +149,7 @@ impl Recovery {
             #[cfg(feature = "qlog")]
             last_metrics: RecoveryMetrics::default(),
             trace_id: String::from(""),
+            loss_timestamps: VecDeque::new(),
         }
     }
 
@@ -302,6 +306,10 @@ impl Recovery {
         }
 
         self.pto_count = 0;
+
+        // Clean up expired loss timestamps
+        self.cleanup_expired_loss_timestamps(now);
+
         self.set_loss_detection_timer(space_id, spaces, handshake_status, now);
         Ok((lost_packets, lost_bytes))
     }
@@ -523,6 +531,13 @@ impl Recovery {
             }
         }
 
+        if lost_bytes > 0 {
+            self.loss_timestamps.push_back((now, lost_bytes));
+        }
+
+        // Clean up expired loss timestamps
+        self.cleanup_expired_loss_timestamps(now);
+
         self.stat_lost_event(lost_packets, lost_bytes);
         (lost_packets, lost_bytes)
     }
@@ -661,6 +676,9 @@ impl Recovery {
             // MUST NOT cause prior unacknowledged packets to be marked as lost.
             space.lost.extend_from_slice(&unacked.frames);
         }
+
+        // Clean up expired loss timestamps
+        self.cleanup_expired_loss_timestamps(now);
 
         self.set_loss_detection_timer(space_id, spaces, handshake_status, now);
         (0, 0)
@@ -970,6 +988,29 @@ impl Recovery {
         self.stats.pacing_rate = self.congestion.pacing_rate().unwrap_or_default();
         self.stats.min_pacing_rate = self.congestion.min_pacing_rate().unwrap_or_default();
         self.stats.pto_count = self.pto_count as u64;
+    }
+
+    /// Clean up expired loss timestamps that are older than current_time - smoothed_rtt
+    fn cleanup_expired_loss_timestamps(&mut self, now: Instant) {
+        let expiry_threshold = now.checked_sub(self.rtt.smoothed_rtt()).unwrap_or_else(|| now);
+        
+        while let Some((front_timestamp,_)) = self.loss_timestamps.front() {
+            if *front_timestamp < expiry_threshold {
+                self.loss_timestamps.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Get the current number of loss events in the tracking window
+    pub fn get_recent_loss_count(&self) -> usize {
+        self.loss_timestamps.len()
+    }
+
+    /// Get all loss timestamps in the current tracking window
+    pub fn get_loss_timestamps(&self) -> &VecDeque<(Instant, u64)> {
+        &self.loss_timestamps
     }
 
     /// Write a qlog RecoveryMetricsUpdated event if any recovery metric is updated.

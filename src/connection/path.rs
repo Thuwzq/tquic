@@ -109,6 +109,12 @@ pub struct Path {
 
     /// Whether the path has been abandoned in MPQUIC mode.
     pub(super) is_abandon: bool,
+
+    /// Whether the path is allowed to send stream frames.
+    pub(super) allow_stream_frames: bool,
+
+    /// Statistics for the Bytes that have received by the path.
+    pub(super) bytes_received: u64,
 }
 
 impl Path {
@@ -154,6 +160,8 @@ impl Path {
             trace_id: trace_id.to_string(),
             space_id: SpaceId::Data,
             is_abandon: false,
+            allow_stream_frames: true,
+            bytes_received: 0,
         }
     }
 
@@ -367,6 +375,26 @@ impl Path {
             }
         }
         false
+    }
+        
+    /// Return if the path is allowed to send stream frames
+    pub fn allow_stream_frames(&self) -> bool {
+        self.allow_stream_frames
+    }
+
+    /// Set the allow_stream_frames flag
+    pub fn set_allow_stream_frames(&mut self, v: bool) {
+        self.allow_stream_frames = v;
+    }
+
+    /// Return the number of bytes received by the path
+    pub fn bytes_received(&self) -> u64 {
+        self.bytes_received
+    }
+
+    /// Set the number of bytes received on the path
+    pub fn set_bytes_received(&mut self, v: u64) {
+        self.bytes_received = v;
     }
 }
 
@@ -667,6 +695,13 @@ impl PathMap {
     /// Promote to multipath mode.
     pub fn enable_multipath(&mut self) {
         self.is_multipath = true;
+    }
+
+    pub fn path_allow_stream_frames(&mut self, path_id: usize) -> bool{
+        if let Some(path) = self.paths.get_mut(path_id) {
+            return path.allow_stream_frames();
+        }
+        true
     }
 }
 
